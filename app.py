@@ -9,9 +9,6 @@ import easyocr
 # LLM (Groq)
 from groq import Groq
 
-# Env (opcional, para local)
-from dotenv import load_dotenv
-
 # ---------- Helpers ----------
 
 @st.cache_resource(show_spinner=False)
@@ -26,19 +23,15 @@ def run_ocr_on_image(img_bytes: bytes, langs):
     result = reader.readtext(np.asarray(image), detail=0, paragraph=True)
     return "\n".join(result)
 
-def get_groq_client():
-    api_key = st.secrets.get("GROQ_API_KEY", None) if hasattr(st, "secrets") else None
-    if not api_key:
-        load_dotenv()
-        api_key = os.getenv("GROQ_API_KEY", None)
+def get_groq_client(api_key: str):
     if not api_key:
         return None
     return Groq(api_key=api_key)
 
-def analyze_text_with_llm(text: str, language: str = "es") -> str:
-    client = get_groq_client()
+def analyze_text_with_llm(text: str, language: str, api_key: str, model_name: str) -> str:
+    client = get_groq_client(api_key)
     if client is None:
-        raise RuntimeError("No se encontró GROQ_API_KEY. Agrega tu clave en st.secrets o .env")
+        raise RuntimeError("No se proporcionó una API Key válida de Groq.")
 
     system_prompt = (
         "Eres un asistente experto en análisis de texto extraído de imágenes. "
@@ -58,7 +51,7 @@ def analyze_text_with_llm(text: str, language: str = "es") -> str:
     """
 
     completion = client.chat.completions.create(
-        model="llama-3.1-70b-versatile",
+        model=model_name,
         temperature=0.3,
         max_tokens=800,
         messages=[
@@ -78,6 +71,8 @@ st.caption("Prototipo: OCR con EasyOCR + análisis con Groq LLM.")
 
 with st.sidebar:
     st.header("⚙️ Configuración")
+    api_key_input = st.text_input("🔑 Ingresa tu API Key de Groq", type="password")
+
     lang_choice = st.multiselect(
         "Idiomas OCR",
         options=["es", "en", "pt", "fr", "de", "it"],
@@ -89,9 +84,11 @@ with st.sidebar:
         ["es", "en", "pt"],
         index=0
     )
-    st.markdown("---")
-    st.subheader("🔐 Clave Groq")
-    st.write("• Usa `st.secrets['GROQ_API_KEY']` en producción\n• O un archivo `.env` con `GROQ_API_KEY=...` para local")
+    model_name = st.text_input(
+        "Modelo LLM de Groq a usar",
+        value="llama-3.1-70b-versatile",
+        help="Especifica un modelo disponible en Groq (ej: llama-3.1-70b-versatile)"
+    )
 
 uploaded = st.file_uploader(
     "Sube una imagen (JPG/PNG)",
@@ -100,6 +97,10 @@ uploaded = st.file_uploader(
 )
 
 if st.button("🔎 Analizar"):
+    if not api_key_input:
+        st.error("Debes ingresar una API Key de Groq.")
+        st.stop()
+
     if uploaded is None:
         st.error("Sube una imagen para analizar.")
         st.stop()
@@ -122,7 +123,7 @@ if st.button("🔎 Analizar"):
 
     st.subheader("🤖 Análisis con LLM (Groq)")
     try:
-        analysis = analyze_text_with_llm(text, language=output_language)
+        analysis = analyze_text_with_llm(text, language=output_language, api_key=api_key_input, model_name=model_name)
         st.write(analysis)
     except Exception as e:
         st.error("Error usando el LLM.")
