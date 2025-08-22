@@ -1,77 +1,62 @@
 import streamlit as st
 from groq import Groq
+import easyocr
 from PIL import Image
-import pytesseract
 
-# =========================
-# Función: Procesar imagen con OCR
-# =========================
-def extract_text_from_image(uploaded_file):
+# Inicializar OCR una sola vez (lector multilenguaje)
+reader = easyocr.Reader(['en', 'es'], gpu=False)
+
+def extract_text_from_image(image_file):
     try:
-        image = Image.open(uploaded_file)
-        text = pytesseract.image_to_string(image, lang="eng+spa")
-        return text.strip()
+        image = Image.open(image_file)
+        result = reader.readtext(image)
+        # Unir todos los textos detectados
+        text = " ".join([res[1] for res in result])
+        return text if text.strip() else "⚠️ No se detectó texto en la imagen."
     except Exception as e:
-        return f"⚠️ Error al procesar la imagen: {str(e)}"
+        return f"⚠️ Error al procesar la imagen con EasyOCR: {e}"
 
-# =========================
-# Función: Consultar LLM
-# =========================
-def analyze_text_with_llm(text, api_key, model_name="llama-3.3-70b-versatile", language="es"):
-    try:
-        client = Groq(api_key=api_key)
+def analyze_text_with_llm(text, language, api_key, model_name):
+    client = Groq(api_key=api_key)
 
-        completion = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": f"Eres un asistente que explica texto en lenguaje claro en {language}."},
-                {"role": "user", "content": f"Explica este texto:\n\n{text}"}
-            ],
-            temperature=0.5,
-            max_tokens=500,
-        )
+    prompt = f"Explica el siguiente texto detectado en una imagen en {language}:\n\n{text}"
 
-        return completion.choices[0].message.content
-    except Exception as e:
-        return f"⚠️ Error al consultar el modelo LLM: {str(e)}"
+    completion = client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": "Eres un asistente experto en interpretación de textos extraídos de imágenes."},
+            {"role": "user", "content": prompt},
+        ],
+    )
 
-# =========================
-# Interfaz Streamlit
-# =========================
-st.set_page_config(page_title="Analizador de Texto en Imágenes", layout="wide")
+    return completion.choices[0].message["content"]
 
-# Siempre mostrar título e instrucciones
-st.title("📄🔍 Analizador de Texto en Imágenes con OCR + LLM")
-st.write("Sube una imagen y obtén una explicación del texto detectado usando un modelo de **Groq**.")
+# --- UI Streamlit ---
+st.title("🔎 OCR + LLM Analyzer")
+st.write("Sube una imagen, se extraerá el texto automáticamente y luego se analizará con un LLM de Groq.")
 
-# Entrada API Key
-api_key_input = st.sidebar.text_input("🔑 Ingresa tu API Key de Groq", type="password")
+# Input de API key
+api_key_input = st.text_input("🔑 Ingresa tu API Key de Groq:", type="password")
 
-# Selección de idioma de salida
-output_language = st.sidebar.selectbox("🌐 Idioma de salida", ["es", "en"])
+# Modelo recomendado
+model_name = "llama-3.3-70b-versatile"
 
-# Subida de archivo
-uploaded_file = st.file_uploader("📤 Sube una imagen (JPG, PNG)", type=["jpg", "jpeg", "png"])
+# Idioma de salida
+output_language = st.selectbox("🌐 Idioma de salida", ["español", "inglés"])
 
-if not api_key_input:
-    st.info("👉 Por favor ingresa tu API Key de Groq en la barra lateral para continuar.")
-else:
-    if uploaded_file:
-        st.image(uploaded_file, caption="📸 Imagen cargada", use_column_width=True)
+# Subir imagen
+uploaded_file = st.file_uploader("📂 Sube una imagen", type=["png", "jpg", "jpeg"])
 
-        with st.spinner("⏳ Extrayendo texto con OCR..."):
-            extracted_text = extract_text_from_image(uploaded_file)
+if uploaded_file and api_key_input:
+    with st.spinner("📝 Extrayendo texto de la imagen..."):
+        text = extract_text_from_image(uploaded_file)
 
-        if extracted_text:
-            st.subheader("📝 Texto detectado")
-            st.write(extracted_text)
+    st.subheader("📝 Texto detectado")
+    st.write(text)
 
-            with st.spinner("🤖 Analizando con LLM..."):
-                analysis = analyze_text_with_llm(extracted_text, api_key=api_key_input, language=output_language)
+    if text and not text.startswith("⚠️"):
+        with st.spinner("🤖 Analizando con LLM de Groq..."):
+            analysis = analyze_text_with_llm(text, language=output_language, api_key=api_key_input, model_name=model_name)
 
-            st.subheader("📖 Explicación generada")
-            st.write(analysis)
-        else:
-            st.warning("⚠️ No se pudo extraer texto de la imagen.")
-    else:
-        st.info("📥 Sube una imagen para comenzar.")
+        st.subheader("📊 Análisis del texto")
+        st.write(analysis)
