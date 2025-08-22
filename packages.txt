@@ -1,0 +1,4 @@
+# Dependencias del sistema necesarias para EasyOCR y PIL
+libgl1
+libglib2.0-0
+ffmpeg
